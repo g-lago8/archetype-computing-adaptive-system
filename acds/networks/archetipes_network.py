@@ -1,14 +1,13 @@
 import math
 import torch
 import sys
-
 from tqdm import tqdm
 sys.path.append("..")
-from typing import List, Sequence
+from typing import List, Optional, Sequence
 from torch import nn
 from acds.archetypes import InterconnectionRON as RON
 from torch.func import functional_call, vmap
-from einops import einsum, rearrange # I like using einops because it allows strings as axes names instead of just letters, and for other stuff
+from einops import einsum, rearrange 
 from functools import partial
 from acds.networks.utils import stack_state
 
@@ -24,12 +23,17 @@ class Cell(nn.Module):
         return self.ron.cell(*args)
 
 
-
 class ArchetipesNetwork(nn.Module):
+
+    input_mask: torch.Tensor
+    output_mask: torch.Tensor
+    connection_scaling: torch.Tensor
     def __init__(
         self,
         archetypes: Sequence[RON],
-        connection_weights: torch.Tensor,
+        connection_topology: torch.Tensor,
+        input_mask: Optional[torch.Tensor] = None,
+        output_mask: Optional[torch.Tensor] = None,
         rho_m: float = 1.0,
     ):
         """A network of interconnected archetipes with any topology
@@ -46,12 +50,20 @@ class ArchetipesNetwork(nn.Module):
         self.n_hid = archetypes[0].n_hid
         self.n_inp = archetypes[0].n_inp
         self.n_modules = len(archetypes)
-        self.connection_weights = nn.Parameter(connection_weights)
-        self.connection_scaling = nn.Parameter(1 / self.connection_weights.sum(1)) # scale by the number of input modules for each row
-        wm = torch.empty(self.n_modules, self.n_modules, self.n_hid, self.n_hid).uniform_(-2, 2)# more general, one wm for every pair of modules. shape (M, M, n_hid, n_hid) and vmap
+        self.connection_weights = nn.Parameter(connection_topology)
+        # init connection topology
+        self.register_buffer("connection_scaling", 1 / self.connection_weights.sum(1)) # scale by the number of input modules for each row
+        wm = torch.empty(self.n_modules, self.n_modules, self.n_hid, self.n_hid).uniform_(-2, 2) # one connection matrix for each pair of modules
         spec_rad = torch.vmap(torch.linalg.eigvals)(rearrange(wm, "m1 m2 n_h1 n_h2 -> (m1 m2) n_h1 n_h2")).abs().amax(1)
         self.wm = einsum(wm, 1 / rearrange(spec_rad, "(m1 m2) -> m1 m2", m1 = math.isqrt(len(spec_rad))), "m1 m2 n_h1 n_h2, m1 m2 -> m1 m2 n_h1 n_h2") * rho_m
-
+        # init input and output mask
+        if input_mask is None:
+            input_mask = torch.ones(self.n_modules)
+        if output_mask is None:
+            output_mask = torch.ones(self.n_modules)
+        self.register_buffer("input_mask", input_mask)
+        self.register_buffer("output_mask", output_mask)
+    
     def _step(self, x:torch.Tensor, prev_states:torch.Tensor, prev_outs:torch.Tensor):
         """Perform one step of forward pass
 
@@ -64,8 +76,9 @@ class ArchetipesNetwork(nn.Module):
         ic_feedback = einsum(self.wm, prev_outs, "n_modules_in n_modules_out n_hid n_hid, n_modules_out n_hid -> n_modules_in n_modules_out n_hid") # transform the outputs before feeding them back
         ic_feedback_masked = einsum(self.connection_weights, ic_feedback, "n_modules_in n_modules_out, n_modules_in n_modules_out n_hid -> n_modules_in n_hid") # inter-connection feedback
         ic_feedback_scaled = einsum(ic_feedback_masked, self.connection_scaling, "n_modules n_hid, n_modules -> n_modules n_hid") # rescale the summed states feedback
-        breakpoint()
-        @partial(vmap, in_dims=(None, 0, 0, None, 0, 0))
+        x = einsum(x, self.input_mask, "..., n_modules -> n_modules ...")
+
+        @partial(vmap, in_dims=(None, 0, 0, 0, 0, 0)) # call all modules in parallel
         def call_module(model, params, buffers, x, hs, feedback):
             new_states = functional_call(model, (params, buffers), (x, hs[0], hs[1], feedback))
             return torch.stack(new_states)
@@ -91,16 +104,18 @@ class ArchetipesNetwork(nn.Module):
             outs = torch.zeros((self.n_modules, self.n_hid))
             
         for x_t in x:
-            states, ins = self._step(x_t, states, outs) 
+            states, ins = self._step(x_t, states, outs)
             outs = states[:, 0] # we assume the first state is the "output" one
             state_list.append(states)
-            input_list.append(ins)
-        return state_list, input_list
+            input_list.append(ins) 
+        return torch.stack(state_list), torch.stack(input_list)
+
+
     
 
 
 def main():
-    N_MODULES = 2
+    N_MODULES = 5
     HDIM = 3
     SEQ_LEN = 3000
     from acds.archetypes import InterconnectionRON
@@ -115,6 +130,7 @@ def main():
     x = torch.randn((SEQ_LEN, HDIM))
     initial_states = torch.zeros((N_MODULES, 2, HDIM))
     states, ins = net(x, initial_states)
+    print(states.shape)
         
     
 
