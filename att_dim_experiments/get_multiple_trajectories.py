@@ -6,7 +6,7 @@ from typing import Optional, Dict, List, Tuple
 
 from tqdm import tqdm
 from acds.archetypes import InterconnectionRON
-from acds.networks import ArchetipesNetwork, random_matrix, full_matrix, cycle_matrix
+from acds.networks import ArchetipesNetwork, random_matrix, full_matrix, cycle_matrix, deep_reservoir, star_matrix, local_connections
 from att_dim_experiments.utils import save_results, load_results
 from einops import rearrange
 import pickle
@@ -62,8 +62,22 @@ def get_model(network_kwargs, n_inp, rho_m):
             input_scaling=network_kwargs.get('input_scaling'),
         ))
 
-    cm_dict = {"random": random_matrix, "full": full_matrix, "cycle": cycle_matrix}
-    connection_matrix = cm_dict[network_kwargs.get("connection_matrix", "cycle")]
+    cm_dict = {"random": random_matrix, 
+               "full": full_matrix, 
+               "cycle": cycle_matrix,
+               "deep": deep_reservoir,
+                "line": deep_reservoir,
+                "star": star_matrix,
+                "local": local_connections,
+                "bidirectional": local_connections 
+                }
+    cm_type = network_kwargs.get("connection_matrix", "cycle")
+    connection_matrix = cm_dict[cm_type]
+    # input connection mask
+    input_mask = torch.ones((network_kwargs['n_modules'],))
+    if cm_type == "bidirectional" or cm_type == "deep":
+        input_mask[1:] = 0 # only first module gets input
+
     if network_kwargs.get("connection_matrix", "cycle") == "random":
         p = network_kwargs.get("p", 0.2)
         connection_matrix = lambda n: random_matrix(n, p)
@@ -248,9 +262,9 @@ if __name__ == "__main__":
     parser.add_argument("--only_load", action="store_true", 
                         help="Only load existing results without collecting new ones")
     # Hyperparameter ranges
-    parser.add_argument("--n_modules_list", type=int, nargs="+", default=[32, 64, 128],
+    parser.add_argument("--n_modules_list", type=int, nargs="+", default=[128, 64, 32, 16, 8, 4, 2, 1],
                         help="List of n_modules values")
-    parser.add_argument("--n_hid_list", type=int, nargs="+", default=[3],
+    parser.add_argument("--n_hid_list", type=int, nargs="+", default=[4, 32, 128],
                         help="List of hidden dimension values")
     parser.add_argument("--rho_list", type=float, nargs="+", default=[0.5, 0.9, 0.99, 1., 2.],
                         help="List of rho values")
@@ -264,7 +278,7 @@ if __name__ == "__main__":
     group = parser.add_argument_group("fixed_network_args")
     group.add_argument("--diffusive_gamma", type=float, default=0.0)
     group.add_argument("--connection_matrix", type=str, default="cycle",
-                       choices=["random", "full", "cycle"])
+                       choices=["random", "full", "cycle", "deep", "line", "star", "local", "bidirectional"])
     group.add_argument("--p", type=float, default=0.2, help="Connection probability for random matrix")
     args = parser.parse_args()
     
