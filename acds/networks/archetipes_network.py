@@ -25,9 +25,9 @@ class Cell(nn.Module):
 
 class ArchetipesNetwork(nn.Module):
 
-    input_mask: torch.Tensor
-    output_mask: torch.Tensor
-    connection_scaling: torch.Tensor
+    input_mask: nn.Parameter
+    output_mask: nn.Parameter
+    connection_scaling: nn.Parameter
     def __init__(
         self,
         archetypes: Sequence[RON],
@@ -85,7 +85,7 @@ class ArchetipesNetwork(nn.Module):
         
         return call_module(self.archetype_structure, self.archetipes_params, self.archetipes_buffers, x, prev_states, ic_feedback_scaled), ic_feedback_scaled
 
-    def forward(self, x:torch.Tensor, initial_states, initial_outs=None):
+    def forward(self, x:torch.Tensor, initial_states=None, initial_outs=None):
         """Forward of the network
 
         Args:
@@ -97,9 +97,11 @@ class ArchetipesNetwork(nn.Module):
             (state_list, input_list): list of states h_i and interconnection inputs for each 
         """
 
-        input_list = [x[0]]
+        input_list = []
+        if initial_states is None:
+            initial_states = torch.zeros((self.n_modules, 2, self.n_hid))
         states = initial_states
-        state_list = [states]
+        state_list = []
         if initial_outs is None:
             outs = torch.zeros((self.n_modules, self.n_hid))
             
@@ -110,7 +112,8 @@ class ArchetipesNetwork(nn.Module):
             input_list.append(ins) 
         return torch.stack(state_list), torch.stack(input_list)
 
-
+    def __repr__(self) -> str:
+        return super().__repr__() + f"\nConnection weights:\n{self.connection_weights} \nInput mask: {self.input_mask}\nOutput mask: {self.output_mask}"
     
 
 
