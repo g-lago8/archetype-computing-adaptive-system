@@ -63,6 +63,7 @@ def compute_effective_rank(trajectory, transient=4000, eps = 1e-10):
             return None
     return ranks
 
+__all__ = ['compute_corr_dim', 'compute_participation_ratio', 'compute_effective_rank']
 
 if __name__ == '__main__':
     # simple test

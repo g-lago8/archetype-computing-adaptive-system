@@ -8,7 +8,7 @@ from sklearn.linear_model import RidgeCV, Ridge, LinearRegression
 from acds.archetypes import InterconnectionRON
 from acds.networks import ArchetipesNetwork, random_matrix, full_matrix, cycle_matrix, deep_reservoir, star_matrix, local_connections
 from att_dim_experiments.data_utils import get_mg17, get_lorenz, get_narma10
-
+from att_dim_experiments.metrics import *
 
 def get_connection_matrix(name: str, n_modules: int, p: float = 0.5, seed: Optional[int] = None) -> torch.Tensor:
     cm_dict = {"random": random_matrix, 
@@ -107,7 +107,7 @@ def nrmse(preds: np.ndarray, target: np.ndarray) -> float:
     return np.sqrt(mse) / (norm + 1e-9)
 
 
-def evaluate(states: torch.Tensor, labels: torch.Tensor, readout: RidgeCV) -> float:
+def evaluate(states: torch.Tensor, labels: torch.Tensor, readout: sklearn.base.BaseEstimator) -> float:
     """Evaluate the readout on the given states and labels."""
     n_modules, n_hid = states.shape[1], states.shape[3]
     X = states[:, :, 0, :].reshape(states.shape[0], n_modules * n_hid).numpy()  # Use only the first state of each module
@@ -122,10 +122,6 @@ def evaluate(states: torch.Tensor, labels: torch.Tensor, readout: RidgeCV) -> fl
     plt.close()
     score = nrmse(y[1000:], y_pred[1000:])  # align predictions with true labels
     return score
-
-
-
-
 
 
 def parse_args():
@@ -183,12 +179,20 @@ def main():
     print("Readout trained.")
     # Evaluate on validation and test sets
     train_score = evaluate(train_states[1000:], torch.Tensor(train_labels[1000:]), readout)
-    #val_score = evaluate(val_states, torch.Tensor(val_labels), readout)
-    #test_score = evaluate(test_states, torch.Tensor(test_labels), readout)
-    print(f"Train NRMSE score: {train_score:.4f}")
-    #print(f"Validation NRMSE score: {val_score:.4f}")
-    #print(f"Test NRMSE score: {test_score:.4f}")
+    val_score = evaluate(val_states, torch.Tensor(val_labels), readout)
+    test_score = evaluate(test_states, torch.Tensor(test_labels), readout)
 
+    # compute metrics on val_states
+    val_states_np = val_states.numpy().reshape(val_states.shape[0], val_states.shape[1], val_states.shape[3])  # (seq_len, n_modules, n_hid)
+    corr_dim = compute_corr_dim(val_states_np, transient=1000)
+    part_ratio = compute_participation_ratio(val_states_np, transient=1000)
+    eff_rank = compute_effective_rank(val_states_np, transient=1000)
+    print(f"Correlation Dimension per module: {corr_dim}")
+    print(f"Participation Ratio per module: {part_ratio}")
+    print(f"Effective Rank per module: {eff_rank}")
+    print(f"Train NRMSE score: {train_score:.4f}")
+    print(f"Validation NRMSE score: {val_score:.4f}")
+    print(f"Test NRMSE score: {test_score:.4f}")
 
 
 if __name__ == "__main__":
