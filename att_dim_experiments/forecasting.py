@@ -1,14 +1,17 @@
+import sys
+sys.path.append(".")
+sys.path.append("..")
 import argparse
-from matplotlib import pyplot as plt
 import torch
 import numpy as np
 from typing import Optional
-import sklearn
-from sklearn.linear_model import RidgeCV, Ridge, LinearRegression
+from sklearn.linear_model import Ridge
+import wandb
 from acds.archetypes import InterconnectionRON
 from acds.networks import ArchetipesNetwork, random_matrix, full_matrix, cycle_matrix, deep_reservoir, star_matrix, local_connections
 from att_dim_experiments.data_utils import get_mg17, get_lorenz, get_narma10
-from att_dim_experiments.metrics import *
+from att_dim_experiments.metrics import compute_corr_dim, compute_participation_ratio, compute_effective_rank, nrmse
+
 
 def get_connection_matrix(name: str, n_modules: int, p: float = 0.5, seed: Optional[int] = None) -> torch.Tensor:
     cm_dict = {"random": random_matrix, 
@@ -80,7 +83,7 @@ def get_data(args):
         raise ValueError(f"Dataset '{dataset_name}' not recognized. Available options are: {allowed_datasets}")
 
 
-def get_reservoir_states(model: ArchetipesNetwork, data: torch.Tensor, initial_states:Optional[torch.Tensor]=None) -> torch.Tensor:
+def compute_states(model: ArchetipesNetwork, data: torch.Tensor, initial_states:Optional[torch.Tensor]=None) -> torch.Tensor:
     """Get reservoir states for the given data."""
     model.eval()
     with torch.no_grad():
@@ -88,38 +91,25 @@ def get_reservoir_states(model: ArchetipesNetwork, data: torch.Tensor, initial_s
     return states
 
 
-def train_readout(states: torch.Tensor, labels: torch.Tensor, transient: int) -> sklearn.base.BaseEstimator:
+def train_readout(states: torch.Tensor, labels: torch.Tensor, transient: int, ridge_alpha: float) -> Ridge:
     """Train a Ridge regression readout on the reservoir states."""
     n_modules, n_hid = states.shape[1], states.shape[3]
     X = states[:, :, 0, :].reshape(states.shape[0], n_modules * n_hid).numpy()  # Use only the first state of each module
     X = X[transient:] # discard transient
     y = labels[transient:].numpy()
     #ridge = Ridge(alpha=0.000)
-    ridge = LinearRegression()
+    ridge = Ridge(alpha=ridge_alpha)
     ridge.fit(X, y)
     return ridge
 
 
-def nrmse(preds: np.ndarray, target: np.ndarray) -> float:
-    mse = np.mean(np.square(preds - target))
-    norm = np.sqrt(np.mean(np.square(target)))
-    # rmse / norm
-    return np.sqrt(mse) / (norm + 1e-9)
-
-
-def evaluate(states: torch.Tensor, labels: torch.Tensor, readout: sklearn.base.BaseEstimator) -> float:
+def evaluate(states: torch.Tensor, labels: torch.Tensor, readout: Ridge) -> float:
     """Evaluate the readout on the given states and labels."""
     n_modules, n_hid = states.shape[1], states.shape[3]
     X = states[:, :, 0, :].reshape(states.shape[0], n_modules * n_hid).numpy()  # Use only the first state of each module
     y = labels.numpy()
     y_pred = readout.predict(X)
     # plot y and y_pred for debug
-    plt.figure()
-    plt.plot(y[1000:2000], label='True')
-    plt.plot(y_pred[1000:2000], label='Predicted')
-    plt.legend()
-    plt.savefig("prediction_plot_debug.png")
-    plt.close()
     score = nrmse(y[1000:], y_pred[1000:])  # align predictions with true labels
     return score
 
@@ -139,6 +129,7 @@ def parse_args():
     parser.add_argument("--rho_m", type=float, default=0.9, help="Spectral radius scaling for inter-module connections")
     parser.add_argument("--input_scaling", type=float, default=1.0, help="Input scaling for the archetype network")
     parser.add_argument("--rho", type=float, default=1.0, help="Spectral radius for each archetype module")
+    # fixed RON dynamics parameters
     parser.add_argument("--diffusive_gamma", type=float, default=0.0, help="Diffusive gamma parameter for the archetype dynamics")
     parser.add_argument("--dt", type=float, default=1.0, help="Time step for the archetype dynamics")
     parser.add_argument("--gamma", type=float, default=1.0, help="Gamma parameter for the archetype dynamics")  
@@ -149,6 +140,8 @@ def parse_args():
     # training parameters
     parser.add_argument("--p", type=float, default=0.5, help="Connection probability for random matrix")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
+    parser.add_argument("--ridge_alpha", type=float, default=1.0, help="Ridge regression regularization strength")
+    parser.add_argument("--silent", action="store_true", help="If set, suppresses print statements")
     return parser.parse_args()
 
 
@@ -156,43 +149,79 @@ def main():
     args = parse_args()
     args_dict = vars(args)
 
+    # Initialize wandb
+    wandb.init(project="archetype-forecasting", config=args_dict)
+
     # Get data
     (train_data, train_labels), (val_data, val_labels), (test_data, test_labels) = get_data(args_dict)
-
-    print(f"Train data shape: {train_data.shape}, Train labels shape: {train_labels.shape}")
-    print(f"Validation data shape: {val_data.shape}, Validation labels shape: {val_labels.shape}")
-    print(f"Test data shape: {test_data.shape}, Test labels shape: {test_labels.shape}")
+    if not args.silent:
+        print(f"Train data shape: {train_data.shape}, Train labels shape: {train_labels.shape}")
+        print(f"Validation data shape: {val_data.shape}, Validation labels shape: {val_labels.shape}")
+        print(f"Test data shape: {test_data.shape}, Test labels shape: {test_labels.shape}")
 
     # Get model
     n_input = train_data.shape[1] if len(train_data.shape) > 1 else 1
     model = get_model(args_dict, n_input=n_input)
-    print(f"Model architecture: {model}")
+    if not args.silent:
+        print(f"Model architecture: {model}")
 
     # Get reservoir states
-    train_states = get_reservoir_states(model, torch.Tensor(train_data)) # (seq_len, n_modules, n_states, n_hid)
-    val_states = get_reservoir_states(model, torch.Tensor(val_data), initial_states=train_states[-1])
-    test_states = get_reservoir_states(model, torch.Tensor(test_data), initial_states=val_states[-1])
-    print(f"Train states shape: {train_states.shape}")
+    train_states = compute_states(model, torch.Tensor(train_data)) # (seq_len, n_modules, n_states, n_hid)
+    val_states = compute_states(model, torch.Tensor(val_data), initial_states=train_states[-1])
+    test_states = compute_states(model, torch.Tensor(test_data), initial_states=val_states[-1])
+    if not args.silent:
+        print(f"Train states shape: {train_states.shape}")
 
     # Train readout
-    readout = train_readout(train_states, torch.Tensor(train_labels), transient=100)
-    print("Readout trained.")
+    ridge_alpha = args.ridge_alpha
+    readout = train_readout(train_states, torch.Tensor(train_labels), transient=100, ridge_alpha=ridge_alpha)
+    if not args.silent:
+        print("Readout trained.")
     # Evaluate on validation and test sets
     train_score = evaluate(train_states[1000:], torch.Tensor(train_labels[1000:]), readout)
     val_score = evaluate(val_states, torch.Tensor(val_labels), readout)
     test_score = evaluate(test_states, torch.Tensor(test_labels), readout)
 
     # compute metrics on val_states
-    val_states_np = val_states.numpy().reshape(val_states.shape[0], val_states.shape[1], val_states.shape[3])  # (seq_len, n_modules, n_hid)
+    val_states_np = val_states.numpy()[:, :, 0] # (seq_len, n_modules, n_hid)
     corr_dim = compute_corr_dim(val_states_np, transient=1000)
     part_ratio = compute_participation_ratio(val_states_np, transient=1000)
     eff_rank = compute_effective_rank(val_states_np, transient=1000)
-    print(f"Correlation Dimension per module: {corr_dim}")
-    print(f"Participation Ratio per module: {part_ratio}")
-    print(f"Effective Rank per module: {eff_rank}")
-    print(f"Train NRMSE score: {train_score:.4f}")
-    print(f"Validation NRMSE score: {val_score:.4f}")
-    print(f"Test NRMSE score: {test_score:.4f}")
+    if not args.silent:
+        print(f"Correlation Dimension per module: {corr_dim}")
+        print(f"Participation Ratio per module: {part_ratio}")
+        print(f"Effective Rank per module: {eff_rank}")
+        print(f"Train NRMSE score: {train_score:.4f}")
+        print(f"Validation NRMSE score: {val_score:.4f}")
+        print(f"Test NRMSE score: {test_score:.4f}")
+
+
+    # Log metrics to wandb
+    wandb.log({
+        "train_nrmse": train_score,
+        "val_nrmse": val_score,
+        "test_nrmse": test_score,
+        "att_dim/correlation_dimension_mean": np.mean(corr_dim),
+        "att_dim/participation_ratio_mean": np.mean(part_ratio),
+        "att_dim/effective_rank_mean": np.mean(eff_rank),
+    })
+
+    # log per-module metrics as tables
+    cd_table = wandb.Table(columns=["module", "correlation_dimension"])
+    pr_table = wandb.Table(columns=["module", "participation_ratio"])
+    er_table = wandb.Table(columns=["module", "effective_rank"])
+    for i in range(len(corr_dim)):
+        cd_table.add_data(i, corr_dim[i])
+        pr_table.add_data(i, part_ratio[i])
+        er_table.add_data(i, eff_rank[i])
+    wandb.log({
+        "att_dim/correlation_dimension_per_module": cd_table,
+        "att_dim/participation_ratio_per_module": pr_table,
+        "att_dim/effective_rank_per_module": er_table,
+    })
+
+    
+    wandb.finish()
 
 
 if __name__ == "__main__":
