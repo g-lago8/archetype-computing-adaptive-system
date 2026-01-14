@@ -1,9 +1,8 @@
 import math
 import torch
 import sys
-from tqdm import tqdm
 sys.path.append("..")
-from typing import List, Optional, Sequence
+from typing import Optional, Sequence
 from torch import nn
 from acds.archetypes import InterconnectionRON as RON
 from torch.func import functional_call, vmap
@@ -25,9 +24,9 @@ class Cell(nn.Module):
 
 class ArchetipesNetwork(nn.Module):
 
-    input_mask: nn.Parameter
-    output_mask: nn.Parameter
-    connection_scaling: nn.Parameter
+    connection_weights: torch.Tensor    
+    input_mask: torch.Tensor
+
     def __init__(
         self,
         archetypes: Sequence[RON],
@@ -50,9 +49,9 @@ class ArchetipesNetwork(nn.Module):
         self.n_hid = archetypes[0].n_hid
         self.n_inp = archetypes[0].n_inp
         self.n_modules = len(archetypes)
-        self.connection_weights = nn.Parameter(connection_topology)
+        self.register_buffer("connection_weights", connection_topology)
         # init connection topology
-        self.register_buffer("connection_scaling", 1 / self.connection_weights.sum(1)) # scale by the number of input modules for each row
+        self.register_buffer("connection_scaling", 1.0 / self.connection_weights.sum(1).float()) # scale by the number of input modules for each row
         wm = torch.empty(self.n_modules, self.n_modules, self.n_hid, self.n_hid).uniform_(-2, 2) # one connection matrix for each pair of modules
         spec_rad = torch.vmap(torch.linalg.eigvals)(rearrange(wm, "m1 m2 n_h1 n_h2 -> (m1 m2) n_h1 n_h2")).abs().amax(1)
         self.wm = einsum(wm, 1 / rearrange(spec_rad, "(m1 m2) -> m1 m2", m1 = math.isqrt(len(spec_rad))), "m1 m2 n_h1 n_h2, m1 m2 -> m1 m2 n_h1 n_h2") * rho_m
@@ -97,7 +96,7 @@ class ArchetipesNetwork(nn.Module):
             (state_list, input_list): list of states h_i and interconnection inputs for each 
         """
 
-        input_list = []
+        fb_list = []
         if initial_states is None:
             initial_states = torch.zeros((self.n_modules, 2, self.n_hid))
         states = initial_states
@@ -106,11 +105,11 @@ class ArchetipesNetwork(nn.Module):
             outs = torch.zeros((self.n_modules, self.n_hid))
             
         for x_t in x:
-            states, ins = self._step(x_t, states, outs)
+            states, fbs = self._step(x_t, states, outs)
             outs = states[:, 0] # we assume the first state is the "output" one
             state_list.append(states)
-            input_list.append(ins) 
-        return torch.stack(state_list), torch.stack(input_list)
+            fb_list.append(fbs) 
+        return torch.stack(state_list), torch.stack(fb_list)
 
     def __repr__(self) -> str:
         return super().__repr__() + f"\nConnection weights:\n{self.connection_weights} \nInput mask: {self.input_mask}\nOutput mask: {self.output_mask}"
@@ -132,7 +131,7 @@ def main():
     print(net)
     x = torch.randn((SEQ_LEN, HDIM))
     initial_states = torch.zeros((N_MODULES, 2, HDIM))
-    states, ins = net(x, initial_states)
+    states, fbs = net(x, initial_states)
     print(states.shape)
         
     
