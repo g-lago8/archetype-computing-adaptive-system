@@ -41,3 +41,16 @@ def stack_state(models: Sequence[torch.nn.Module]):
     Returns (params, buffers) suitable for torch.func.functional_call.
     """
     return stack_params(models), stack_buffers(models)
+
+
+def unstack_state(stacked_params: Dict[str, torch.Tensor], stacked_buffers: Dict[str, torch.Tensor]) -> Sequence[Dict[str, torch.Tensor]]:
+    """
+    Unstack batched PyTree into a list of PyTrees for each model.
+    """
+    n_models = next(iter(stacked_params.values())).shape[0]
+    unstacked = []
+    for i in range(n_models):
+        params_i = {name: tensor[i] for name, tensor in stacked_params.items()}
+        buffers_i = {name: tensor[i] for name, tensor in stacked_buffers.items()}
+        unstacked.append((params_i, buffers_i))
+    return unstacked
