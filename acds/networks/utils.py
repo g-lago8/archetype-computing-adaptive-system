@@ -52,5 +52,5 @@ def unstack_state(stacked_params: Dict[str, torch.Tensor], stacked_buffers: Dict
     for i in range(n_models):
         params_i = {name: tensor[i] for name, tensor in stacked_params.items()}
         buffers_i = {name: tensor[i] for name, tensor in stacked_buffers.items()}
-        unstacked.append((params_i, buffers_i))
+        unstacked.append(params_i | buffers_i)
     return unstacked

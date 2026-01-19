@@ -29,7 +29,7 @@ def compute_corr_dim(trajectory: np.ndarray, k1=5,  k2=20, transient=4000) -> li
     corr_dim_values = []
     for i in range(trajectory.shape[1]): # for each module in the network
         corr_dim_estimator = CorrInt(k1=k1, k2=k2)
-        traj_i = trajectory[transient:, i, 0]
+        traj_i = trajectory[transient:, i]
         corr_dim = corr_dim_estimator.fit_transform(traj_i)
         corr_dim_values.append(corr_dim)
 
@@ -48,7 +48,7 @@ def compute_participation_ratio(trajectory, transient=4000) -> list[float]:
     n_modules = trajectory.shape[1]
     participation_ratios = []
     for i in range(n_modules):
-        traj_i = trajectory[transient:, i, 0]
+        traj_i = trajectory[transient:, i]
         # compute covariance matrix
         cov_matrix = np.cov(traj_i, rowvar=False)
         # compute eigenvalues
@@ -71,7 +71,7 @@ def compute_effective_rank(trajectory, transient=4000, eps = 1e-10) -> list[floa
     n_modules = trajectory.shape[1]
     ranks = []
     for i in range(n_modules):
-        traj_i = trajectory[transient:, i, 0]
+        traj_i = trajectory[transient:, i]
         singvals = np.linalg.svdvals(traj_i)
         s = np.sum(np.abs(singvals))
         n_singvals = singvals / s
@@ -93,7 +93,7 @@ def compute_lyapunov(model:ArchetipesNetwork, trajectory: np.ndarray, inputs: np
     Args:
         model (ArchetipesNetwork): The model used to generate the trajectory
         trajectory (np.ndarray): trajectory of shape (N_steps, N_modules, N_h)
-        inputs (np.ndarray): inputs of shape (N_steps, N_modules, N_h)
+        inputs (np.ndarray): inputs of shape (N_steps, N_inp) - SHARED across all modules
         feedbacks (np.ndarray): feedbacks of shape (N_steps, N_modules, N_h)
         n_lyap (int): number of Lyapunov exponents to compute
         transient (int, optional): number of initial steps to discard. Defaults to 4000.
@@ -104,7 +104,7 @@ def compute_lyapunov(model:ArchetipesNetwork, trajectory: np.ndarray, inputs: np
     from acds.networks.connection_matrices import cycle_matrix
     lib = ctypes.CDLL("liblyapunov.so")
     exponents = []
-    for module in unstack_state(model.archetipes_params, model.archetipes_buffers):
+    for module_idx, module in enumerate(unstack_state(model.archetipes_params, model.archetipes_buffers)):
         params_i, buffers_i = module
         # Prepare parameters and buffers for C function
         ron = InterconnectionRON(model.n_inp, model.n_hid, dt=1.0, gamma=1.0, epsilon=1.0)
@@ -114,9 +114,12 @@ def compute_lyapunov(model:ArchetipesNetwork, trajectory: np.ndarray, inputs: np
         V = np.ascontiguousarray(ron.x2h.detach().numpy())
         b = np.ascontiguousarray(ron.bias.detach().numpy())
 
-        trajectory_i = np.ascontiguousarray(trajectory[transient:, 0, :])  
-        inputs_i = np.ascontiguousarray(inputs[transient:])
-        feedbacks_i = np.ascontiguousarray(feedbacks[transient:, 0, :])
+        # Extract trajectory for this specific module
+        trajectory_i = np.ascontiguousarray(trajectory[:, module_idx, :])
+        # Inputs are shared across all modules (not indexed by module_idx)
+        inputs_i = np.ascontiguousarray(inputs)
+        # Extract feedbacks for this specific module  
+        feedbacks_i = np.ascontiguousarray(feedbacks[:, module_idx, :])
 
 
         W_ctypes = W.ctypes.data_as(ctypes.POINTER(ctypes.c_double))
@@ -146,7 +149,8 @@ def compute_lyapunov(model:ArchetipesNetwork, trajectory: np.ndarray, inputs: np
             inp_ctypes, 
             fb_ctypes,
             
-            lyap_exponents)
+            lyap_exponents
+        )
 
         exponents.append([lyap_exponents[i] for i in range(n_lyap)])
     return exponents
@@ -161,7 +165,7 @@ if __name__ == '__main__':
     from acds.networks.connection_matrices import cycle_matrix 
     inputs = torch.ones((10000, 1))
 
-    model = ArchetipesNetwork([InterconnectionRON(1, 15, 1, 1, 1, rho=0.99) for _ in range(4)], cycle_matrix(4))
+    model = ArchetipesNetwork([InterconnectionRON(1, 2, 1, 1, 1, rho=0.9) for _ in range(4)], cycle_matrix(4))
     
     traj, fbs = model(inputs)
     traj = traj.detach().numpy()
@@ -171,3 +175,4 @@ if __name__ == '__main__':
     print("Participation Ratio:", compute_participation_ratio(traj))
     print("Effective Rank:", compute_effective_rank(traj))
     print("Lyapunov Exponents:", compute_lyapunov(model, traj, inputs, fbs, n_lyap=1))
+
