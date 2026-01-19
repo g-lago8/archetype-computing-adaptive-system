@@ -10,8 +10,9 @@ import wandb
 from acds.archetypes import InterconnectionRON
 from acds.networks import ArchetipesNetwork, random_matrix, full_matrix, cycle_matrix, deep_reservoir, star_matrix, local_connections
 from att_dim_experiments.data_utils import get_mg17, get_lorenz, get_narma10
+from acds.networks.utils import unstack_state
 from att_dim_experiments.metrics import compute_corr_dim, compute_participation_ratio, compute_effective_rank, nrmse
-
+from att_dim_experiments.lyap_discreteRNN import compute_lyapunov
 
 def get_connection_matrix(name: str, n_modules: int, p: float = 0.5, seed: Optional[int] = None) -> torch.Tensor:
     cm_dict = {"random": random_matrix, 
@@ -83,12 +84,19 @@ def get_data(args):
         raise ValueError(f"Dataset '{dataset_name}' not recognized. Available options are: {allowed_datasets}")
 
 
-def compute_states(model: ArchetipesNetwork, data: torch.Tensor, initial_states:Optional[torch.Tensor]=None) -> torch.Tensor:
+def get_params_from_model(model: ArchetipesNetwork):
+    state = unstack_state(model.archetipes_params, model.archetipes_buffers)
+    print("Model parameters:")
+    return state
+
+
+
+def compute_states(model: ArchetipesNetwork, data: torch.Tensor, initial_states:Optional[torch.Tensor]=None) -> tuple[torch.Tensor, torch.Tensor]:
     """Get reservoir states for the given data."""
     model.eval()
     with torch.no_grad():
-        states, _ = model.forward(data, initial_states)
-    return states
+        states, fbs = model.forward(data, initial_states)
+    return states, fbs
 
 
 def train_readout(states: torch.Tensor, labels: torch.Tensor, transient: int, ridge_alpha: float) -> Ridge:
@@ -145,12 +153,12 @@ def parse_args():
     return parser.parse_args()
 
 
-def main():
+def run_forecasting():
     args = parse_args()
     args_dict = vars(args)
 
     # Initialize wandb
-    wandb.init(project="archetype-forecasting", config=args_dict)
+    wandb.init(project=f"archetype-forecasting-{args.dataset}", config=args_dict)
 
     # Get data
     (train_data, train_labels), (val_data, val_labels), (test_data, test_labels) = get_data(args_dict)
@@ -162,13 +170,14 @@ def main():
     # Get model
     n_input = train_data.shape[1] if len(train_data.shape) > 1 else 1
     model = get_model(args_dict, n_input=n_input)
+    params = get_params_from_model(model)
     if not args.silent:
         print(f"Model architecture: {model}")
 
     # Get reservoir states
-    train_states = compute_states(model, torch.Tensor(train_data)) # (seq_len, n_modules, n_states, n_hid)
-    val_states = compute_states(model, torch.Tensor(val_data), initial_states=train_states[-1])
-    test_states = compute_states(model, torch.Tensor(test_data), initial_states=val_states[-1])
+    train_states, train_fbs = compute_states(model, torch.Tensor(train_data)) # (seq_len, n_modules, n_states, n_hid)
+    val_states, val_fbs = compute_states(model, torch.Tensor(val_data), initial_states=train_states[-1])
+    test_states, test_fbs = compute_states(model, torch.Tensor(test_data), initial_states=val_states[-1])
     if not args.silent:
         print(f"Train states shape: {train_states.shape}")
 
@@ -181,21 +190,29 @@ def main():
     train_score = evaluate(train_states[1000:], torch.Tensor(train_labels[1000:]), readout)
     val_score = evaluate(val_states, torch.Tensor(val_labels), readout)
     test_score = evaluate(test_states, torch.Tensor(test_labels), readout)
-
+    
     # compute metrics on val_states
     val_states_np = val_states.numpy()[:, :, 0] # (seq_len, n_modules, n_hid)
+    val_fbs_np = val_fbs.numpy()
+    print(val_states_np.shape)
+
     corr_dim = compute_corr_dim(val_states_np, transient=1000)
     part_ratio = compute_participation_ratio(val_states_np, transient=1000)
     eff_rank = compute_effective_rank(val_states_np, transient=1000)
+    lyapunov_exps = []
+    for i, p in enumerate(params):
+        lyap = compute_lyapunov(nl=2, W=p['h2h']. numpy().T, V=p['x2h'].numpy().T, b=p['bias'].numpy(), h_traj=val_states_np[:, i], u_traj=val_data, fb_traj=val_fbs_np[:, i])
+        lyapunov_exps.append(lyap)
     if not args.silent:
         print(f"Correlation Dimension per module: {corr_dim}")
         print(f"Participation Ratio per module: {part_ratio}")
         print(f"Effective Rank per module: {eff_rank}")
+        print(f"Maximum Lyapunov Exponent per module: {[l for l in lyapunov_exps]}")
         print(f"Train NRMSE score: {train_score:.4f}")
         print(f"Validation NRMSE score: {val_score:.4f}")
         print(f"Test NRMSE score: {test_score:.4f}")
 
-
+    
     # Log metrics to wandb
     wandb.log({
         "train_nrmse": train_score,
@@ -219,10 +236,18 @@ def main():
         "att_dim/participation_ratio_per_module": pr_table,
         "att_dim/effective_rank_per_module": er_table,
     })
-
+    lyapunov_table = wandb.Table(columns=["module", "lyapunov exponents"])
+    mle_table = wandb.Table(columns=["module", "mle"])
+    for i in range(len(corr_dim)):
+        lyapunov_table.add_data(i, lyapunov_exps[i])
+        mle_table.add_data(i, lyapunov_exps[i][0]) # maximum
+    wandb.log({
+        "lyapunov/lyapunov_exponents": lyapunov_table,
+        "lyapunov/mle": mle_table
+    })
     
     wandb.finish()
 
 
 if __name__ == "__main__":
-    main()
+    run_forecasting()
