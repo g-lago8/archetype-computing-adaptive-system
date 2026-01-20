@@ -86,7 +86,6 @@ def get_data(args):
 
 def get_params_from_model(model: ArchetipesNetwork):
     state = unstack_state(model.archetipes_params, model.archetipes_buffers)
-    print("Model parameters:")
     return state
 
 
@@ -194,7 +193,6 @@ def run_forecasting():
     # compute metrics on val_states
     val_states_np = val_states.numpy()[:, :, 0] # (seq_len, n_modules, n_hid)
     val_fbs_np = val_fbs.numpy()
-    print(val_states_np.shape)
 
     corr_dim = compute_corr_dim(val_states_np, transient=1000)
     part_ratio = compute_participation_ratio(val_states_np, transient=1000)
