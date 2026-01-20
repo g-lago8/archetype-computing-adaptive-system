@@ -3,16 +3,19 @@ sys.path.append(".")
 sys.path.append("..")
 import argparse
 import torch
+import os
 import numpy as np
 from typing import Optional
 from sklearn.linear_model import Ridge
 import wandb
+import pandas as pd
 from acds.archetypes import InterconnectionRON
 from acds.networks import ArchetipesNetwork, random_matrix, full_matrix, cycle_matrix, deep_reservoir, star_matrix, local_connections
 from att_dim_experiments.data_utils import get_mg17, get_lorenz, get_narma10
 from acds.networks.utils import unstack_state
 from att_dim_experiments.metrics import compute_corr_dim, compute_participation_ratio, compute_effective_rank, nrmse
 from att_dim_experiments.lyap_discreteRNN import compute_lyapunov
+
 
 def get_connection_matrix(name: str, n_modules: int, p: float = 0.5, seed: Optional[int] = None) -> torch.Tensor:
     cm_dict = {"random": random_matrix, 
@@ -210,16 +213,23 @@ def run_forecasting():
         print(f"Validation NRMSE score: {val_score:.4f}")
         print(f"Test NRMSE score: {test_score:.4f}")
 
-    
-    # Log metrics to wandb
-    wandb.log({
+    metrics = {
         "train_nrmse": train_score,
         "val_nrmse": val_score,
         "test_nrmse": test_score,
         "att_dim/correlation_dimension_mean": np.mean(corr_dim),
         "att_dim/participation_ratio_mean": np.mean(part_ratio),
         "att_dim/effective_rank_mean": np.mean(eff_rank),
-    })
+    }
+    
+    # Log metrics to wandb
+    wandb.log(metrics)
+
+    metrics.update(
+        {"att_dim/correlation_dimension": corr_dim,
+        "att_dim/participation_ratio": part_ratio,
+        "att_dim/effective_rank": eff_rank,
+        })
 
     # log per-module metrics as tables
     cd_table = wandb.Table(columns=["module", "correlation_dimension"])
@@ -243,8 +253,16 @@ def run_forecasting():
         "lyapunov/lyapunov_exponents": lyapunov_table,
         "lyapunov/mle": mle_table
     })
-    
+    metrics.update(
+        {"att_dim/lyapunov": lyapunov_exps}
+    )
+    metrics.update(vars(args))
+    df = pd.DataFrame([metrics])
+    file_exists = os.path.isfile("trajectories/metrics.csv")
+        
+    df.to_csv("trajectories/metrics.csv", mode="a" if file_exists else "w", header=True, index=False)
     wandb.finish()
+
 
 
 if __name__ == "__main__":
