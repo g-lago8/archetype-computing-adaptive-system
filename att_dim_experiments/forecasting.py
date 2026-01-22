@@ -5,10 +5,10 @@ import argparse
 import torch
 import os
 import numpy as np
-from typing import Optional
-from sklearn.linear_model import Ridge
 import wandb
 import pandas as pd
+from typing import Optional
+from sklearn.linear_model import Ridge
 from acds.archetypes import InterconnectionRON
 from acds.networks import ArchetipesNetwork, random_matrix, full_matrix, cycle_matrix, deep_reservoir, star_matrix, local_connections
 from att_dim_experiments.data_utils import get_mg17, get_lorenz, get_narma10
@@ -64,8 +64,8 @@ def get_model(args, n_input: int = 1):
     connection_matrix = cm_dict[cm_type]
     # input connection mask
     input_mask = torch.ones((args['n_modules'],))
-    if cm_type == "bidirectional" or cm_type == "deep":
-        input_mask[1:] = 0 # only first module gets input
+    # if cm_type == "bidirectional" or cm_type == "deep":
+    #     input_mask[1:] = 0 # only first module gets input
 
     if args.get("connection_matrix", "cycle") == "random":
         p = args.get("p", 0.2)
