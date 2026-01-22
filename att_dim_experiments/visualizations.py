@@ -4,22 +4,61 @@ import numpy as np
 from typing import List, Optional
 
 
-def scatter_metrics_vs_performance(df, metric_names: List[str], performance_metric: str, title: str, save_path: Optional[str] = None):
+def scatter_metrics_vs_performance(
+    df,
+    metric_names: List[str],
+    performance_metric: str,
+    title: str,
+    save_path: Optional[str] = None,
+    semilogy: bool = False,
+):
     n_metrics = len(metric_names)
-    fig, axes = plt.subplots(1, n_metrics, figsize=(5 * n_metrics, 4))
-    
-    if n_metrics == 1:
-        axes = [axes]
-    
-    for ax, metric in zip(axes, metric_names):
-        # scatter plot with  x-axis: metric y-axis: performance_metric color: n_modules marker: connection type
 
-        sns.scatterplot(data=df, x=metric, y=performance_metric, hue='n_modules', style='connection_type', ax=ax, palette='inferno')
-        ax.set_title(f'{metric} vs {performance_metric}')
+    fig, axes = plt.subplots(
+        1,
+        n_metrics,
+        figsize=(5 * n_metrics, 4),
+        constrained_layout=True
+    )
+
+    axes = np.atleast_1d(axes)
+
+    for i, (ax, metric) in enumerate(zip(axes, metric_names)):
+        sns.scatterplot(
+            data=df,
+            x=metric,
+            y=performance_metric,
+            hue="n_modules",
+            style="connection_matrix",
+            palette="inferno",
+            ax=ax,
+            legend=(i==0)  # create legend on first axis only
+        )
+
+        ax.set_title(f"{metric} vs {performance_metric}")
         ax.set_xlabel(metric)
         ax.set_ylabel(performance_metric)
-    plt.suptitle(title)
-    plt.tight_layout()
+
+        if semilogy:
+            ax.set_yscale("log")
+
+    # Extract legend handles from the first axis
+    handles, labels = axes[0].get_legend_handles_labels()
+    axes[0].legend_.remove()
+    # Place a single legend to the right of all subplots
+    fig.legend(
+        handles,
+        labels,
+        loc="center left",
+        bbox_to_anchor=(1.02, 0.5)
+    )
+
+    fig.suptitle(title)
+
+    if save_path:
+        plt.savefig(save_path, bbox_inches="tight")
+
+    plt.show()
     
     if save_path:
         plt.savefig(save_path)
@@ -102,13 +141,13 @@ if __name__ == "__main__":
     data['performance_metric'] = data['correlation_dimension'] * 0.5 + data['participation_ratio'] * 0.5 + np.random.rand(100) * 0.1
     df = pd.DataFrame(data)
 
-    # scatter_metrics_vs_performance(
-    #     df,
-    #     metric_names=['correlation_dimension', 'participation_ratio'],
-    #     performance_metric='performance_metric',
-    #     title='Attractor Dimension Metrics vs Performance',
-    #     save_path=None
-    # )
+    scatter_metrics_vs_performance(
+        df,
+        metric_names=['correlation_dimension', 'participation_ratio'],
+        performance_metric='performance_metric',
+        title='Attractor Dimension Metrics vs Performance',
+        save_path=None
+    )
 
     spider_plot(
         df,
