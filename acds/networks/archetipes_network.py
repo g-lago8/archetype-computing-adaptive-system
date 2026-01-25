@@ -52,7 +52,6 @@ class ArchetipesNetwork(nn.Module):
         self.register_buffer("connection_weights", connection_topology)
         # init connection topology
         self.register_buffer("connection_scaling",torch.where( self.connection_weights.sum(1).float() > 0, 1.0 / self.connection_weights.sum(1).float(), 0. )) # scale by the number of input modules for each row
-        print("connection weights", self.connection_scaling)
         wm = torch.empty(self.n_modules, self.n_modules, self.n_hid, self.n_hid).uniform_(-2, 2) # one connection matrix for each pair of modules
         spec_rad = torch.vmap(torch.linalg.eigvals)(rearrange(wm, "m1 m2 n_h1 n_h2 -> (m1 m2) n_h1 n_h2")).abs().amax(1)
         self.wm = einsum(wm, 1 / rearrange(spec_rad, "(m1 m2) -> m1 m2", m1 = math.isqrt(len(spec_rad))), "m1 m2 n_h1 n_h2, m1 m2 -> m1 m2 n_h1 n_h2") * rho_m
@@ -84,7 +83,6 @@ class ArchetipesNetwork(nn.Module):
         def call_module(model, params, buffers, x, hs, feedback):
             new_states = functional_call(model, (params, buffers), (x, hs[:, 0] if batched else hs[0], hs[:, 1] if batched else hs[1], feedback))
             return torch.stack(new_states, dim=-2) # unbatched: (2, h_dim) batched (batch_size, 2, hdim)
-        print(prev_states.shape)
         return call_module(self.archetype_structure, self.archetipes_params, self.archetipes_buffers, x, prev_states, ic_feedback_scaled), ic_feedback_scaled
 
     def forward(self, x:torch.Tensor, initial_states=None, initial_outs=None):
