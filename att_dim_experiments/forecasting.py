@@ -13,7 +13,7 @@ from acds.archetypes import InterconnectionRON
 from acds.networks import ArchetipesNetwork, random_matrix, full_matrix, cycle_matrix, deep_reservoir, star_matrix, local_connections
 from att_dim_experiments.data_utils import get_mg17, get_lorenz, get_narma10
 from acds.networks.utils import unstack_state
-from att_dim_experiments.metrics import compute_corr_dim, compute_participation_ratio, compute_effective_rank, nrmse
+from att_dim_experiments.metrics import compute_corr_dim, compute_participation_ratio, compute_effective_traj_rank, nrmse
 from att_dim_experiments.lyap_discreteRNN import compute_lyapunov
 
 
@@ -199,7 +199,7 @@ def run_forecasting():
 
     corr_dim = compute_corr_dim(val_states_np, transient=1000)
     part_ratio = compute_participation_ratio(val_states_np, transient=1000)
-    eff_rank = compute_effective_rank(val_states_np, transient=1000)
+    eff_rank = compute_effective_traj_rank(val_states_np, transient=1000)
     lyapunov_exps = []
     for i, p in enumerate(params):
         lyap = compute_lyapunov(nl=2, W=p['h2h']. numpy().T, V=p['x2h'].numpy().T, b=p['bias'].numpy(), h_traj=val_states_np[:, i], u_traj=val_data, fb_traj=val_fbs_np[:, i])

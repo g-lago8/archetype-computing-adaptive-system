@@ -59,7 +59,7 @@ def compute_participation_ratio(trajectory, transient=4000) -> list[float]:
     return participation_ratios
 
 
-def compute_effective_rank(trajectory, transient=4000, eps = 1e-10) -> list[float]:
+def compute_effective_traj_rank(trajectory, transient=4000, eps = 1e-10) -> list[float]:
     """
     Compute Effective Rank for each module in a set of trajectories
     Args:
@@ -78,6 +78,29 @@ def compute_effective_rank(trajectory, transient=4000, eps = 1e-10) -> list[floa
         entropy = - np.dot(n_singvals + eps, np.log(n_singvals + eps)) 
         ranks.append(np.exp(entropy))
     return ranks
+
+
+def compute_effective_kernel_rank(trajectory, eps = 1e-10) -> list[float]:
+    """
+    Compute Effective Rank for each module in a set of training states
+    Args:
+        trajectory (np.ndarray): trajectory of shape (batch_size, N_steps, N_modules, N_h)
+    Returns:
+        Optional[list[float]]: List of effective rank estimates for each module, or None if an error occurs
+    """
+    n_modules = trajectory.shape[2]
+    ranks = []
+    for i in range(n_modules):
+        kernel_j = trajectory[:, -1, i]
+
+        singvals = np.linalg.svdvals(kernel_j)
+        s = max(np.sum(np.abs(singvals)), eps)
+        p = singvals / s
+        p = p[p > 0]
+        entropy =  -np.sum(p * np.log(p + eps))
+        ranks.append(np.exp(entropy))
+    return ranks
+
 
 
 def nrmse(preds: np.ndarray, target: np.ndarray) -> float:
@@ -156,7 +179,7 @@ def compute_lyapunov(model:ArchetipesNetwork, trajectory: np.ndarray, inputs: np
     return exponents
 
 
-__all__ = ['compute_corr_dim', 'compute_participation_ratio', 'compute_effective_rank', 'nrmse']
+__all__ = ['compute_corr_dim', 'compute_participation_ratio', 'compute_effective_traj_rank', 'nrmse', 'compute_effective_kernel_rank']
 
 if __name__ == '__main__':
     # simple test
@@ -173,6 +196,6 @@ if __name__ == '__main__':
     fbs = fbs.detach().numpy()
     print("Correlation Dimension:", compute_corr_dim(traj))
     print("Participation Ratio:", compute_participation_ratio(traj))
-    print("Effective Rank:", compute_effective_rank(traj))
+    print("Effective Rank:", compute_effective_traj_rank(traj))
     print("Lyapunov Exponents:", compute_lyapunov(model, traj, inputs, fbs, n_lyap=1))
 
