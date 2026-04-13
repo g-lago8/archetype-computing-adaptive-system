@@ -13,8 +13,7 @@ from acds.archetypes import InterconnectionRON
 from acds.networks import ArchetipesNetwork, random_matrix, full_matrix, cycle_matrix, deep_reservoir, star_matrix, local_connections
 from att_dim_experiments.data_utils import get_mg17, get_lorenz, get_narma10
 from acds.networks.utils import unstack_state
-from acds.metrics import compute_corr_dim, compute_participation_ratio, compute_effective_traj_rank, nrmse
-from acds.metrics import compute_lyapunov
+from acds.metrics import compute_corr_dim, compute_participation_ratio, compute_effective_traj_rank, compute_lyapunov_from_model, nrmse
 
 
 def get_connection_matrix(name: str, n_modules: int, p: float = 0.5, seed: Optional[int] = None) -> torch.Tensor:
@@ -90,7 +89,6 @@ def get_data(args):
 def get_params_from_model(model: ArchetipesNetwork):
     state = unstack_state(model.archetipes_params, model.archetipes_buffers)
     return state
-
 
 
 def compute_states(model: ArchetipesNetwork, data: torch.Tensor, initial_states:Optional[torch.Tensor]=None) -> tuple[torch.Tensor, torch.Tensor]:
@@ -200,10 +198,8 @@ def run_forecasting():
     corr_dim = compute_corr_dim(val_states_np, transient=1000)
     part_ratio = compute_participation_ratio(val_states_np, transient=1000)
     eff_rank = compute_effective_traj_rank(val_states_np, transient=1000)
-    lyapunov_exps = []
-    for i, p in enumerate(params):
-        lyap = compute_lyapunov(nl=2, W=p['h2h']. numpy().T, V=p['x2h'].numpy().T, b=p['bias'].numpy(), h_traj=val_states_np[:, i], u_traj=val_data, fb_traj=val_fbs_np[:, i])
-        lyapunov_exps.append(lyap)
+    lyapunov_exps = compute_lyapunov_from_model(model, val_states_np, val_data, val_fbs_np, n_lyap=1, model_type="ron", dt=args.dt, diffusive_gamma=args.diffusive_gamma)
+
     if not args.silent:
         print(f"Correlation Dimension per module: {corr_dim}")
         print(f"Participation Ratio per module: {part_ratio}")
@@ -258,9 +254,9 @@ def run_forecasting():
     )
     metrics.update(vars(args))
     df = pd.DataFrame([metrics])
-    file_exists = os.path.isfile("trajectories/metrics.csv")
+    file_exists = os.path.isfile("trajectories/metrics_ron.csv")
         
-    df.to_csv("trajectories/metrics.csv", mode="a" if file_exists else "w", header=True, index=False)
+    df.to_csv("trajectories/metrics_ron.csv", mode="a" if file_exists else "w", header=True, index=False)
     wandb.finish()
 
 
