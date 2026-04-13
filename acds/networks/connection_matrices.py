@@ -1,5 +1,6 @@
 import torch
-
+import networkx as nx
+import matplotlib.pyplot as plt
 
 def cycle_matrix(n):
     if n == 1:
@@ -98,27 +99,23 @@ def grid_local_connections(n_rows, n_cols, torus=False, diag=False):
                     m[idx, idx - n_cols + 1] = 1  # top-right
                 if r > 0 and c > 0:
                     m[idx, idx - n_cols - 1] = 1  # top-left
-
     return m
 
 
-if __name__ == '__main__':
-    print(cycle_matrix(5), "\n")
-    print(full_matrix(5), "\n")
-    print(local_connections(5), "\n")
-    print(deep_reservoir(5), "\n")
-    lc = grid_local_connections(4, 4, torus=True, diag=True)
-    # Print a graphical representation
-    for row in lc:
-        print(' '.join(['#' if x == 1 else '.' for x in row]))
-    print("\n")
-    print("\n")
-    lc = grid_local_connections(4, 4, torus=False, diag=True)
-    # Print a graphical representation
-    for row in lc:
-        print(' '.join(['#' if x == 1 else '.' for x in row]))
-    
-
-
-    print("\n")
-
+def visualize_matrix_as_graph(matrix, layout='spring', save_path=None):
+    plt.figure(figsize=(8, 8))
+    G = nx.from_numpy_array(matrix.numpy())
+    if layout == 'spring':
+        pos = nx.spring_layout(G)
+    elif layout == 'circular':
+        pos = nx.circular_layout(G)
+    elif layout == 'kamada_kawai':
+        pos = nx.kamada_kawai_layout(G)
+    elif layout == 'grid':
+        pos = {i: (i % 5, i // 5) for i in range(matrix.shape[0])}
+    else:
+        raise ValueError("Unsupported layout type. Choose from 'spring', 'circular', 'kamada_kawai'.")
+    nx.draw(G, pos, with_labels=True, node_color='lightblue', edge_color='gray')
+    if save_path is not None:
+        plt.savefig(save_path)
+    plt.show()
