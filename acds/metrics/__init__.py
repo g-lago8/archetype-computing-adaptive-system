@@ -20,8 +20,8 @@ from .attractor import (
     compute_effective_traj_rank,
     compute_participation_ratio,
 )
-from .lyapunov import compute_lyapunov, compute_lyapunov_from_model
-from .performance import nrmse
+from .lyapunov import compute_lyapunov, compute_lyapunov_ron, compute_lyapunov_from_model
+from .performance import nrmse, accuracy
 from .visualizations import (
     heatmap_metrics,
     lineplot_by_n_modules,
@@ -37,6 +37,7 @@ __all__ = [
     "compute_effective_kernel_rank",
     # performance
     "nrmse",
+    "accuracy",
     # lyapunov
     "compute_lyapunov",
     "compute_lyapunov_from_model",
