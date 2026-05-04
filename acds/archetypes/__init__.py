@@ -5,6 +5,7 @@ from .trainable_pron import TrainedPhysicallyImplementableRandomizedOscillatorsN
 from .hcornn import hcoRNN
 from .esn import DeepReservoir
 from .rnn import LSTM, RNN_DFA, GRU_DFA
+from .run import UnicycleNetwork
 from .utils import *
 
 __all__ = ["RandomizedOscillatorsNetwork", "DeepReservoir", "LSTM", "RNN_DFA", "GRU_DFA",
