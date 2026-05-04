@@ -12,4 +12,4 @@ __all__ = ["RandomizedOscillatorsNetwork", "DeepReservoir", "LSTM", "RNN_DFA", "
            "PhysicallyImplementableRandomizedOscillatorsNetwork",
            "MultistablePhysicallyImplementableRandomizedOscillatorsNetwork",
            "TrainedPhysicallyImplementableRandomizedOscillatorsNetwork",
-           "hcoRNN"]
+           "hcoRNN", "UnicycleNetwork"]
