@@ -11,7 +11,7 @@ from typing import Optional
 from sklearn.linear_model import Ridge
 from acds.archetypes import InterconnectionRON
 from acds.networks import ArchetipesNetwork, random_matrix, full_matrix, cycle_matrix, deep_reservoir, star_matrix, local_connections
-from att_dim_experiments.data_utils import get_mg17, get_lorenz, get_narma10
+from att_dim_experiments.data_utils import get_mg17, get_lorenz, get_narma
 from acds.networks.utils import unstack_state
 from acds.metrics import compute_corr_dim, compute_participation_ratio, compute_effective_traj_rank, compute_lyapunov_from_model, nrmse
 
@@ -75,13 +75,17 @@ def get_model(args, n_input: int = 1):
 
 def get_data(args):
     dataset_name = args['dataset']
-    allowed_datasets = ["mg17", "lorenz", "narma10"]
+    allowed_datasets = ["mg17", "mg32", "lorenz", "narma10", "narma30"]
     if dataset_name == "mg17":
         return get_mg17(train_len=5000, val_len=3000, test_len=2000, forecasting_delay=1)
+    elif dataset_name == "mg32":
+        return get_mg17(train_len=5000, val_len=3000, test_len=2000, forecasting_delay=1, tau=32)
     elif dataset_name == "lorenz":
         return get_lorenz(train_len=5000, val_len=3000, test_len=2000, forecasting_delay=1)
     elif dataset_name == "narma10":
-        return get_narma10(train_len=5000, val_len=3000, test_len=2000)
+        return get_narma(train_len=5000, val_len=3000, test_len=2000, order=10)
+    elif dataset_name == "narma30":
+        return get_narma(train_len=5000, val_len=3000, test_len=2000, order=30)
     else:
         raise ValueError(f"Dataset '{dataset_name}' not recognized. Available options are: {allowed_datasets}")
 
@@ -117,7 +121,7 @@ def evaluate(states: torch.Tensor, labels: torch.Tensor, readout: Ridge) -> floa
     X = states[:, :, 0, :].reshape(states.shape[0], n_modules * n_hid).numpy()  # Use only the first state of each module
     y = labels.numpy()
     y_pred = readout.predict(X)
-    # plot y and y_pred for debug
+    y_pred = y_pred.reshape(-1)  # ensure shape is (n_samples,) for nrmse calculation
     score = nrmse(y[1000:], y_pred[1000:])  # align predictions with true labels
     return score
 
@@ -153,8 +157,9 @@ def parse_args():
     return parser.parse_args()
 
 
-def run_forecasting():
-    args = parse_args()
+def run_forecasting(args=None):
+    if args is None:
+        args = parse_args()
     args_dict = vars(args)
 
     # Initialize wandb
@@ -254,9 +259,12 @@ def run_forecasting():
     )
     metrics.update(vars(args))
     df = pd.DataFrame([metrics])
-    file_exists = os.path.isfile("trajectories/metrics_ron.csv")
+    default_savepath = "metric_results/metrics_ron.csv"
+    save_path = args_dict.get("save_path", default_savepath)
+    file_exists = os.path.isfile(save_path)
         
-    df.to_csv("trajectories/metrics_ron.csv", mode="a" if file_exists else "w", header=True, index=False)
+    df.to_csv(save_path, mode="a" if file_exists else "w", header=not file_exists,
+              index=False)
     wandb.finish()
 
 

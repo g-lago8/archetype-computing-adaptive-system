@@ -64,9 +64,9 @@ def get_lorenz(train_len, val_len, test_len, dt=0.01, forecasting_delay=1):
     return (train_data, train_labels), (val_data, val_labels), (test_data, test_labels)
 
 
-def get_narma10(train_len, val_len, test_len):
-
-    """Generate NARMA10 time series dataset.
+def get_narma(train_len, val_len, test_len, c1=0.3, c2=0.05, c3=1.5, c4=0.1, order=30):
+    
+    """Generate NARMA time series dataset.
     Args:
         train_len (int): Length of the training set.
         val_len (int): Length of the validation set.
@@ -78,20 +78,19 @@ def get_narma10(train_len, val_len, test_len):
     u = np.random.uniform(0, 0.5, (total_len, 1))
     y = np.zeros((total_len,1), dtype=np.float32)
 
-    for t in range(10, total_len):
+    for t in range(order, total_len):
         y[t] = (
-            0.3 * y[t - 1]
-            + 0.05 * y[t - 1] * np.sum(y[t - 10 : t])
-            + 1.5 * u[t - 1] * u[t - 10]
-            + 0.1
+            c1 * y[t - 1]
+            + c2 * y[t - 1] * np.sum(y[t - order : t])
+            + c3 * u[t - 1] * u[t - order]
+            + c4
         )
 
     train_data = y[:train_len]
     val_data = y[train_len:train_len + val_len]
     test_data = y[train_len + val_len:]
 
-    return (u[:train_len], train_data), (u[train_len:train_len + val_len], val_data), (u[train_len + val_len:-1], test_data)
-
+    return (u[:train_len], train_data), (u[train_len:train_len + val_len], val_data), (u[train_len + val_len:], test_data)
 
 
 
@@ -105,7 +104,7 @@ def main():
 
     # Generate data
     mg, _, _ = get_mg17(train_len, val_len, test_len)
-    narma, _, _ = get_narma10(train_len, val_len, test_len)
+    narma, _, _ = get_narma(train_len, val_len, test_len)
     lorenz, _, _ = get_lorenz(train_len, val_len, test_len)
 
     t = np.arange(train_len)
